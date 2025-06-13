@@ -4,130 +4,171 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI-Prepper is an offline RAG (Retrieval-Augmented Generation) chatbot designed for Apple Silicon Macs. It combines Wikipedia knowledge with a local LLM to answer questions without internet connectivity.
-
-## Common Commands
-
-### Setup and Development
-```bash
-# Complete setup (creates venv, downloads models/data, builds index)
-make all
-
-# Individual setup steps
-make deps       # Install dependencies in virtual environment
-make models     # Download LLM and embedding models (~15GB)
-make wiki       # Download and extract Wikipedia (~20GB compressed)
-make index      # Build FAISS search index
-
-# Running the application
-make run        # Interactive CLI chatbot
-make web        # Web UI at http://localhost:8000
-make question Q="What is photosynthesis?"  # Single question
-
-# Development
-make test       # Run full test suite
-make test-quick # Run unit tests only (skip slow integration tests)
-make check      # Verify system status
-make lint       # Run code linters
-make format     # Auto-format code
-```
-
-### Testing Specific Components
-```bash
-# Test individual modules
-source venv/bin/activate
-python -m pytest tests/test_chunk_utils.py -v
-python -m pytest tests/test_config_loader.py::TestConfig::test_load_config -v
-
-# Test scripts directly
-python scripts/download_models.py --help
-python scripts/build_index.py --verify
-python scripts/chat.py --question "test query" --show-context
-```
+AI-Prepper is a Docker-based offline RAG (Retrieval-Augmented Generation) system designed for complete offline operation. It combines Wikipedia knowledge with local LLMs using Ollama, ChromaDB for vector storage, and includes both a custom Streamlit UI and Flowise for visual RAG workflows.
 
 ## Architecture Overview
 
-The system follows a RAG pipeline:
+The system uses Docker Compose to orchestrate multiple services:
 
-1. **Data Pipeline** (`scripts/download_wikipedia.py` → `scripts/chunk_utils.py` → `scripts/build_index.py`):
-   - Downloads Wikipedia XML dump, extracts articles to plaintext
-   - Chunks text using token-aware sliding windows (512 tokens, 128 overlap)
-   - Creates embeddings and builds FAISS index for similarity search
+1. **Ollama** - LLM server providing model inference
+2. **ChromaDB** - Vector database for semantic search
+3. **Flowise** - Complete chat interface and visual workflow builder
+4. **Processor** - Python service for data ingestion
 
-2. **Retrieval System** (`scripts/chat.py:retrieve_context()`):
-   - Encodes queries using same embedding model
-   - Searches FAISS index for top-k similar chunks
-   - Filters by relevance threshold (0.7 default)
-
-3. **Generation System** (`scripts/chat.py:generate_response()`):
-   - Formats retrieved chunks as context
-   - Uses MLX-optimized Mistral-7B for response generation
-   - Supports graceful degradation to smaller models
-
-## Key Design Patterns
-
-### Configuration-Driven Architecture
-All major settings are in `configs/config.yaml`. The `Config` class provides:
-- Dot notation access: `config.get('models.llm.default')`
-- Automatic path expansion and memory detection
-- Model selection based on available RAM
-
-### Memory-Aware Design
-The system automatically detects available memory:
-- <20GB RAM: Uses 4-bit quantized model
-- ≥20GB RAM: Uses 8-bit quantized model
-- Configurable via `system.low_memory_mode`
-
-### MLX Optimization
-Uses Apple's MLX framework for Metal GPU acceleration:
-- Primary path for both LLM and embeddings
-- Falls back to sentence-transformers for embeddings if MLX fails
-- ~3-5x faster than CPU inference
-
-### Error Handling Strategy
-- Resume support for interrupted downloads
-- Graceful fallbacks for model loading
-- Clear error messages pointing to solutions (e.g., "Run 'make all' first")
-
-## Data Flow
-
+### Service Communication
 ```
-User Query → Query Embedding → FAISS Search → Retrieve Chunks
-                                                      ↓
-Response ← LLM Generation ← Prompt with Context ← Format Context
+User → Flowise UI → Ollama (LLM)
+                  ↘
+                    ChromaDB (Vector Search)
+                  ↗
+Wikipedia Data → Processor → ChromaDB
 ```
 
-## Important Implementation Details
+## Common Commands
 
-### Text Chunking (`chunk_utils.py`)
-- Uses tiktoken for accurate token counting
-- Implements overlapping windows to preserve context
-- Handles large sentences that exceed chunk size
+### Docker Management
+```bash
+# Start/stop services
+make up         # Start all services
+make down       # Stop all services
+make status     # Check service health
+make logs       # View service logs
 
-### Index Building (`build_index.py`)
-- Normalizes embeddings for cosine similarity
-- Stores chunks separately from index for flexibility
-- Saves metadata for filtering and display
+# Data management
+make pull-models    # Download Ollama models
+make download-wiki  # Download Wikipedia dump
+make process        # Process Wikipedia into ChromaDB
 
-### Chat Interface (`chat.py`)
-- Maintains conversation history in `~/.ai-prepping_history`
-- Supports both interactive and single-question modes
-- Shows source attribution with relevance scores
+# Development
+make shell      # Shell into processor container
+make test       # Run tests
+make clean-all  # Remove everything including data
+```
+
+## Key Files and Their Purposes
+
+### Docker Configuration
+- `docker-compose.yml` - Service definitions and networking
+- `Dockerfile` - Processor service image
+- `.env.example` - Environment configuration template
+
+### Core Scripts
+- `scripts/orchestrator.py` - Service initialization and health checks
+- `scripts/process_wikipedia.py` - Wikipedia ingestion into ChromaDB
+- `scripts/download_wikipedia.py` - Wikipedia dump downloader
+- `scripts/chunk_utils.py` - Text chunking utilities
+
+### Flowise Configuration
+- Flows are stored in `data/flowise/`
+- Access at http://localhost:3000
+- Default credentials: admin/admin
+
+## Configuration
+
+All configuration is done via environment variables in `.env`:
+
+```env
+# Models
+OLLAMA_MODELS=llama3.2,nomic-embed-text
+LLM_MODEL=llama3.2
+EMBEDDING_MODEL=nomic-embed-text
+
+# Data paths (can be external drive)
+OLLAMA_DATA_PATH=./data/ollama
+CHROMA_DATA_PATH=./data/chroma
+WIKIPEDIA_DATA_PATH=./data/wikipedia
+
+# Processing
+CHUNK_SIZE=512
+CHUNK_OVERLAP=128
+MAX_ARTICLES=10000
+```
+
+## Development Patterns
+
+### Adding New Features
+
+1. **New Ollama Model**: Update `OLLAMA_MODELS` in `.env`
+2. **New UI Features**: Modify `app/app.py`
+3. **New Data Sources**: Create processor in `scripts/`
+4. **New Services**: Add to `docker-compose.yml`
+
+### Service Health Checks
+
+All services include health checks:
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:PORT/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+```
+
+### Data Persistence
+
+All data is stored in Docker volumes mapped to local directories:
+- Models: `./data/ollama`
+- Vectors: `./data/chroma`
+- Wikipedia: `./data/wikipedia`
+- Workflows: `./data/flowise`
 
 ## Testing Approach
 
-- Unit tests for utilities (chunking, config)
-- Integration tests with small Wikipedia stubs
-- Mocked external dependencies (downloads, models)
-- GitHub Actions on macOS ARM64 runners
+```bash
+# Test service connectivity
+make test
 
-## Working with Models
+# Test chat interface
+curl http://localhost:3000
 
-The project uses MLX-community models from Hugging Face:
-- LLM: `mlx-community/Mistral-7B-v0.1-8bit` (default)
-- Embeddings: `mlx-community/bge-large-en-v1.5`
+# Test Ollama
+curl http://localhost:11434/api/generate -d '{"model":"llama3.2","prompt":"Hello"}'
 
-To add new models:
-1. Add to `configs/config.yaml` under `models.llm.alternatives`
-2. Test with `make model-<model-name>`
-3. Update checksums if implementing verification
+# Test ChromaDB
+curl http://localhost:8000/api/v1/heartbeat
+```
+
+## Common Issues and Solutions
+
+### Services won't start
+- Check Docker is running: `docker info`
+- Check port conflicts: `lsof -i :11434`
+- View logs: `make logs`
+
+### Out of memory
+- Reduce model size in `.env`
+- Use `phi3` instead of `llama3.2`
+- Increase Docker memory allocation
+
+### Slow performance
+- Use GPU acceleration (remove from docker-compose.yml if no GPU)
+- Reduce `CHUNK_SIZE` for faster search
+- Limit `MAX_ARTICLES` for smaller dataset
+
+## External Drive Setup
+
+For complete portability:
+
+1. Set `EXTERNAL_DRIVE_PATH` in `.env`
+2. All data paths will use this as base
+3. Can move entire `data/` directory to external drive
+4. Services will work from any machine with Docker
+
+## Important Notes
+
+- **No internet required** after initial setup
+- All models cached locally in Docker volumes
+- ChromaDB persists vectors between restarts
+- Flowise workflows saved automatically
+- Wikipedia data processed once, reused forever
+
+## Working with the Codebase
+
+When making changes:
+1. Test locally first: `make shell` then run scripts
+2. Update both Dockerfiles if adding dependencies
+3. Consider memory/disk usage for offline scenarios
+4. Maintain compatibility with external drive setup
+5. Keep services independent and loosely coupled
+
+The goal is a system that can be set up once and run forever offline.

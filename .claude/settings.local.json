@@ -4,7 +4,11 @@
       "Bash(git init:*)",
       "Bash(git remote add:*)",
       "Bash(mkdir:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(rg:*)",
+      "Bash(brew install:*)",
+      "Bash(make:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

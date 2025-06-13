@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Download and validate ML models for AI-Prepping."""
+"""Check and validate Ollama models for AI-Prepping."""
 
 import os
 import sys
 import argparse
-import hashlib
+import subprocess
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
-from urllib.parse import urlparse
+from typing import Optional, Dict, List, Any
 
-import requests
-from tqdm import tqdm
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
-import mlx_lm
+from rich.table import Table
 
 # Add parent dir to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
@@ -24,301 +20,344 @@ from scripts.config_loader import get_config
 console = Console()
 
 
-class ModelDownloader:
-    """Handles downloading and validation of ML models."""
+class OllamaChecker:
+    """Checks for required Ollama models."""
     
     def __init__(self, config: Optional[Any] = None):
-        """Initialize downloader with configuration."""
+        """Initialize checker with configuration."""
         self.config = config or get_config()
-        self.models_dir = Path(self.config.models_dir)
-        self.models_dir.mkdir(parents=True, exist_ok=True)
         
-    def download_file(self, url: str, dest_path: Path, desc: str = "Downloading") -> bool:
-        """Download a file with progress bar and resume support.
+    def check_ollama_installed(self) -> bool:
+        """Check if Ollama is installed and running.
         
-        Args:
-            url: URL to download from
-            dest_path: Destination file path
-            desc: Description for progress bar
-            
         Returns:
-            True if successful, False otherwise
+            True if Ollama is accessible
         """
-        headers = {}
-        mode = 'wb'
-        resume_pos = 0
-        
-        # Check if partial download exists
-        if dest_path.exists():
-            resume_pos = dest_path.stat().st_size
-            headers['Range'] = f'bytes={resume_pos}-'
-            mode = 'ab'
-        
         try:
-            response = requests.get(url, headers=headers, stream=True, 
-                                  timeout=self.config.get('downloads.timeout', 300))
-            response.raise_for_status()
+            # Check if ollama command exists
+            result = subprocess.run(['which', 'ollama'], 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                console.print("[red]✗ Ollama is not installed[/red]")
+                console.print("\nPlease install Ollama:")
+                console.print("  brew install ollama")
+                console.print("  ollama serve  # Start the server")
+                return False
             
-            # Get total size
-            total_size = int(response.headers.get('content-length', 0))
-            if resume_pos > 0:
-                total_size += resume_pos
+            # Check if server is running
+            import requests
+            try:
+                response = requests.get('http://localhost:11434/api/version', timeout=2)
+                if response.status_code == 200:
+                    version = response.json().get('version', 'unknown')
+                    console.print(f"[green]✓ Ollama server is running (version: {version})[/green]")
+                    return True
+            except:
+                pass
             
-            # Download with progress bar
-            with open(dest_path, mode) as f:
-                with tqdm(total=total_size, initial=resume_pos, 
-                         unit='B', unit_scale=True, desc=desc) as pbar:
-                    for chunk in response.iter_content(
-                        chunk_size=self.config.get('downloads.chunk_size', 8192)):
-                        if chunk:
-                            f.write(chunk)
-                            pbar.update(len(chunk))
-            
-            return True
+            console.print("[yellow]! Ollama is installed but server is not running[/yellow]")
+            console.print("\nPlease start Ollama server:")
+            console.print("  ollama serve")
+            return False
             
         except Exception as e:
-            console.print(f"[red]Download failed: {e}[/red]")
+            console.print(f"[red]Error checking Ollama: {e}[/red]")
             return False
     
-    def verify_checksum(self, file_path: Path, expected_hash: str) -> bool:
-        """Verify file checksum.
+    def list_models(self) -> List[Dict[str, Any]]:
+        """List installed Ollama models.
+        
+        Returns:
+            List of model info dicts
+        """
+        try:
+            result = subprocess.run(['ollama', 'list'], 
+                                  capture_output=True, text=True)
+            if result.returncode != 0:
+                return []
+            
+            models = []
+            lines = result.stdout.strip().split('\n')[1:]  # Skip header
+            for line in lines:
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        name = parts[0].split(':')[0]  # Remove tag
+                        size = ' '.join(parts[2:4])  # Size with unit
+                        models.append({
+                            'name': name,
+                            'full_name': parts[0],
+                            'size': size
+                        })
+            
+            return models
+        except Exception as e:
+            console.print(f"[red]Error listing models: {e}[/red]")
+            return []
+    
+    def check_model(self, model_name: str) -> bool:
+        """Check if a specific model is installed.
         
         Args:
-            file_path: Path to file
-            expected_hash: Expected SHA-256 hash
+            model_name: Name of the model to check
             
         Returns:
-            True if checksum matches
+            True if model is installed
         """
-        if not expected_hash or expected_hash == "sha256:expected_hash_here":
-            console.print("[yellow]Warning: Checksum verification skipped (no hash provided)[/yellow]")
-            return True
+        models = self.list_models()
+        model_names = [m['name'] for m in models]
+        return model_name in model_names
+    
+    def pull_model(self, model_name: str) -> bool:
+        """Pull a model from Ollama registry.
+        
+        Args:
+            model_name: Name of the model to pull
             
-        console.print("Verifying checksum...")
-        sha256_hash = hashlib.sha256()
+        Returns:
+            True if successful
+        """
+        console.print(f"[cyan]Pulling model: {model_name}[/cyan]")
+        console.print("This may take several minutes depending on model size...")
         
-        with open(file_path, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
+        try:
+            # Run ollama pull with real-time output
+            process = subprocess.Popen(
+                ['ollama', 'pull', model_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            
+            # Stream output
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    console.print(line.rstrip())
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                console.print(f"[green]✓ Model {model_name} pulled successfully[/green]")
+                return True
+            else:
+                console.print(f"[red]✗ Failed to pull model {model_name}[/red]")
+                return False
+                
+        except Exception as e:
+            console.print(f"[red]Error pulling model: {e}[/red]")
+            return False
+    
+    def check_required_models(self) -> Dict[str, bool]:
+        """Check all required models.
         
-        calculated = f"sha256:{sha256_hash.hexdigest()}"
-        if calculated == expected_hash:
-            console.print("[green]✓ Checksum verified[/green]")
-            return True
+        Returns:
+            Dict mapping model names to installation status
+        """
+        required_models = []
+        
+        # LLM models
+        llm_model = self.config.get('models.llm.default')
+        if llm_model:
+            required_models.append(llm_model)
+        
+        # Embedding model
+        embed_model = self.config.get('models.embeddings.model')
+        if embed_model:
+            required_models.append(embed_model)
+        
+        # Check each model
+        status = {}
+        for model in required_models:
+            status[model] = self.check_model(model)
+        
+        return status
+    
+    def ensure_models(self, auto_pull: bool = False) -> bool:
+        """Ensure all required models are available.
+        
+        Args:
+            auto_pull: Automatically pull missing models
+            
+        Returns:
+            True if all models are available
+        """
+        # First check Ollama
+        if not self.check_ollama_installed():
+            return False
+        
+        # Check required models
+        console.print("\n[bold]Checking required models:[/bold]")
+        status = self.check_required_models()
+        
+        # Display status table
+        table = Table(title="Model Status")
+        table.add_column("Model", style="cyan")
+        table.add_column("Status", style="green")
+        table.add_column("Action", style="yellow")
+        
+        missing_models = []
+        for model, installed in status.items():
+            if installed:
+                table.add_row(model, "✓ Installed", "-")
+            else:
+                table.add_row(model, "✗ Not found", "Need to pull")
+                missing_models.append(model)
+        
+        console.print(table)
+        
+        # Handle missing models
+        if missing_models:
+            console.print(f"\n[yellow]Missing {len(missing_models)} model(s)[/yellow]")
+            
+            if auto_pull:
+                console.print("\n[cyan]Auto-pulling missing models...[/cyan]")
+                for model in missing_models:
+                    if not self.pull_model(model):
+                        return False
+            else:
+                console.print("\nTo download missing models, run:")
+                for model in missing_models:
+                    console.print(f"  ollama pull {model}")
+                console.print("\nOr run: make models")
+                return False
         else:
-            console.print(f"[red]✗ Checksum mismatch![/red]")
-            console.print(f"  Expected: {expected_hash}")
-            console.print(f"  Got:      {calculated}")
-            return False
+            console.print("\n[green]✓ All required models are installed![/green]")
+        
+        return True
     
-    def download_llm(self, model_name: Optional[str] = None) -> bool:
-        """Download LLM model using mlx_lm.
+    def list_alternatives(self):
+        """List alternative models that can be used."""
+        console.print("\n[bold]Alternative models you can use:[/bold]")
         
-        Args:
-            model_name: Model name to download, or None for default
-            
-        Returns:
-            True if successful
-        """
-        if model_name is None:
-            model_name = self.config.llm_model
+        alternatives = self.config.get('models.llm.alternatives', [])
         
-        model_path = self.models_dir / model_name.replace('/', '_')
+        table = Table(title="Recommended LLM Alternatives")
+        table.add_column("Model", style="cyan")
+        table.add_column("Size", style="yellow")
+        table.add_column("Description", style="white")
         
-        # Check if already exists
-        if model_path.exists() and any(model_path.iterdir()):
-            console.print(f"[green]✓ LLM model already exists: {model_name}[/green]")
-            return True
+        # Model descriptions
+        descriptions = {
+            "llama3.2": "3B, Latest Llama, very efficient",
+            "mistral": "7B, Fast and capable",
+            "qwen2.5": "7B, Great multilingual support",
+            "phi3": "3.8B, Microsoft's efficient model",
+            "gemma2": "9B, Google's powerful model"
+        }
         
-        console.print(f"[cyan]Downloading LLM: {model_name}[/cyan]")
+        sizes = {
+            "llama3.2": "~2GB",
+            "mistral": "~4GB",
+            "qwen2.5": "~4GB",
+            "phi3": "~2.3GB",
+            "gemma2": "~5GB"
+        }
         
-        try:
-            # Download using mlx_lm
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                transient=True,
-            ) as progress:
-                progress.add_task(description=f"Downloading {model_name}...", total=None)
-                
-                # This will download and cache the model
-                from mlx_lm import load
-                model, tokenizer = load(model_name)
-                
-                # Save model info
-                info_path = model_path / "model_info.json"
-                model_path.mkdir(parents=True, exist_ok=True)
-                with open(info_path, 'w') as f:
-                    json.dump({
-                        "name": model_name,
-                        "type": "llm",
-                        "framework": "mlx"
-                    }, f, indent=2)
-            
-            console.print(f"[green]✓ LLM downloaded successfully[/green]")
-            return True
-            
-        except Exception as e:
-            console.print(f"[red]Failed to download LLM: {e}[/red]")
-            return False
-    
-    def download_embeddings(self) -> bool:
-        """Download embeddings model.
+        for model in alternatives:
+            desc = descriptions.get(model, "Alternative LLM")
+            size = sizes.get(model, "Varies")
+            table.add_row(model, size, desc)
         
-        Returns:
-            True if successful
-        """
-        model_name = self.config.get('models.embeddings.model')
-        model_path = self.models_dir / model_name.replace('/', '_')
+        console.print(table)
         
-        # Check if already exists
-        if model_path.exists() and any(model_path.iterdir()):
-            console.print(f"[green]✓ Embeddings model already exists: {model_name}[/green]")
-            return True
+        console.print("\n[bold]Embedding models:[/bold]")
+        embed_table = Table()
+        embed_table.add_column("Model", style="cyan")
+        embed_table.add_column("Size", style="yellow")
+        embed_table.add_column("Dimensions", style="white")
         
-        console.print(f"[cyan]Downloading embeddings: {model_name}[/cyan]")
+        embed_table.add_row("nomic-embed-text", "~274MB", "768")
+        embed_table.add_row("mxbai-embed-large", "~670MB", "1024")
+        embed_table.add_row("all-minilm", "~22MB", "384")
         
-        try:
-            # Download using mlx_lm
-            from mlx_lm import load
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                transient=True,
-            ) as progress:
-                progress.add_task(description=f"Downloading {model_name}...", total=None)
-                
-                # Load the model (this downloads it)
-                model, tokenizer = load(model_name)
-                
-                # Save model info
-                info_path = model_path / "model_info.json"
-                model_path.mkdir(parents=True, exist_ok=True)
-                with open(info_path, 'w') as f:
-                    json.dump({
-                        "name": model_name,
-                        "type": "embeddings",
-                        "framework": "mlx",
-                        "dimension": self.config.get('models.embeddings.dimension')
-                    }, f, indent=2)
-            
-            console.print(f"[green]✓ Embeddings downloaded successfully[/green]")
-            return True
-            
-        except Exception as e:
-            console.print(f"[red]Failed to download embeddings: {e}[/red]")
-            # Try alternative download method for embeddings
-            console.print("[yellow]Trying alternative download method...[/yellow]")
-            return self._download_embeddings_alternative(model_name, model_path)
-    
-    def _download_embeddings_alternative(self, model_name: str, model_path: Path) -> bool:
-        """Alternative method to download embeddings using sentence-transformers format."""
-        try:
-            # Import at runtime to avoid dependency if not needed
-            from sentence_transformers import SentenceTransformer
-            
-            console.print(f"[cyan]Downloading via sentence-transformers...[/cyan]")
-            model = SentenceTransformer(model_name)
-            
-            # Save the model
-            model_path.mkdir(parents=True, exist_ok=True)
-            model.save(str(model_path))
-            
-            # Save model info
-            info_path = model_path / "model_info.json"
-            with open(info_path, 'w') as f:
-                json.dump({
-                    "name": model_name,
-                    "type": "embeddings",
-                    "framework": "sentence-transformers",
-                    "dimension": self.config.get('models.embeddings.dimension')
-                }, f, indent=2)
-            
-            console.print(f"[green]✓ Embeddings downloaded successfully (sentence-transformers)[/green]")
-            return True
-            
-        except Exception as e:
-            console.print(f"[red]Alternative download also failed: {e}[/red]")
-            return False
-    
-    def download_all(self) -> bool:
-        """Download all required models.
+        console.print(embed_table)
         
-        Returns:
-            True if all downloads successful
-        """
-        success = True
-        
-        # Download LLM
-        if not self.download_llm():
-            success = False
-        
-        # Download alternative LLM if configured
-        if self.config.get('system.low_memory_mode'):
-            small_model = self.config.get('models.llm.small')
-            if small_model and not self.download_llm(small_model):
-                success = False
-        
-        # Download embeddings
-        if not self.download_embeddings():
-            success = False
-        
-        return success
+        console.print("\nTo use a different model:")
+        console.print("1. Pull it: ollama pull <model-name>")
+        console.print("2. Update configs/config.yaml")
 
 
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Download ML models for AI-Prepping",
+        description="Check and manage Ollama models for AI-Prepping",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        '--model', 
-        choices=['llm', 'embeddings', 'all'],
-        default='all',
-        help='Which model(s) to download'
-    )
-    parser.add_argument(
-        '--llm-name',
-        help='Specific LLM to download (overrides config)'
-    )
-    parser.add_argument(
-        '--force',
+        '--pull', 
         action='store_true',
-        help='Force re-download even if models exist'
+        help='Automatically pull missing models'
+    )
+    parser.add_argument(
+        '--list',
+        action='store_true',
+        help='List installed models'
+    )
+    parser.add_argument(
+        '--alternatives',
+        action='store_true',
+        help='Show alternative model options'
+    )
+    parser.add_argument(
+        '--model',
+        help='Check or pull a specific model'
     )
     
     args = parser.parse_args()
     
-    # Initialize downloader
-    downloader = ModelDownloader()
+    # Initialize checker
+    checker = OllamaChecker()
     
-    # Clear existing models if forced
-    if args.force:
-        console.print("[yellow]Force mode: clearing existing models...[/yellow]")
-        import shutil
-        if downloader.models_dir.exists():
-            shutil.rmtree(downloader.models_dir)
-        downloader.models_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Download requested models
-    success = True
-    
-    if args.model in ['llm', 'all']:
-        if not downloader.download_llm(args.llm_name):
-            success = False
-    
-    if args.model in ['embeddings', 'all']:
-        if not downloader.download_embeddings():
-            success = False
-    
-    if success:
-        console.print("\n[green]✓ All models downloaded successfully![/green]")
+    # Handle different modes
+    if args.list:
+        if not checker.check_ollama_installed():
+            return 1
+            
+        models = checker.list_models()
+        if models:
+            console.print("\n[bold]Installed Ollama models:[/bold]")
+            table = Table()
+            table.add_column("Model", style="cyan")
+            table.add_column("Full Name", style="yellow")
+            table.add_column("Size", style="green")
+            
+            for model in models:
+                table.add_row(model['name'], model['full_name'], model['size'])
+            
+            console.print(table)
+        else:
+            console.print("[yellow]No models installed yet[/yellow]")
         return 0
+    
+    elif args.alternatives:
+        checker.list_alternatives()
+        return 0
+    
+    elif args.model:
+        if not checker.check_ollama_installed():
+            return 1
+            
+        if checker.check_model(args.model):
+            console.print(f"[green]✓ Model {args.model} is installed[/green]")
+            return 0
+        else:
+            console.print(f"[yellow]Model {args.model} is not installed[/yellow]")
+            if args.pull:
+                if checker.pull_model(args.model):
+                    return 0
+                else:
+                    return 1
+            else:
+                console.print(f"\nTo install: ollama pull {args.model}")
+                return 1
+    
     else:
-        console.print("\n[red]✗ Some downloads failed. Please check errors above.[/red]")
-        return 1
+        # Default: ensure all required models
+        if checker.ensure_models(auto_pull=args.pull):
+            return 0
+        else:
+            return 1
 
 
 if __name__ == "__main__":

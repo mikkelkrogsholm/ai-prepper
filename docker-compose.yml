@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  # Ollama - LLM Server
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-prepper-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ChromaDB - Vector Database
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ai-prepper-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+      - ALLOW_RESET=true
+      - IS_PERSISTENT=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Flowise - Visual RAG Builder
+  flowise:
+    image: flowiseai/flowise:latest
+    container_name: ai-prepper-flowise
+    ports:
+      - "3000:3000"
+    volumes:
+      - flowise_data:/root/.flowise
+    environment:
+      - FLOWISE_USERNAME=${FLOWISE_USERNAME:-admin}
+      - FLOWISE_PASSWORD=${FLOWISE_PASSWORD:-admin}
+      - APIKEY_PATH=/root/.flowise
+      - SECRETKEY_PATH=/root/.flowise
+      - LOG_LEVEL=info
+      - DEBUG=false
+    restart: unless-stopped
+    depends_on:
+      - chromadb
+      - ollama
+    command: /bin/sh -c "sleep 10 && npm start"
+
+  # Wikipedia Processor - Custom service for data ingestion
+  processor:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-prepper-processor
+    volumes:
+      - wikipedia_data:/app/data
+      - ./configs:/app/configs
+      - ./scripts:/app/scripts
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+    depends_on:
+      - chromadb
+      - ollama
+    restart: no
+    command: ["tail", "-f", "/dev/null"]  # Keep container running for manual operations
+
+volumes:
+  ollama_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${OLLAMA_DATA_PATH:-./data/ollama}
+  
+  chroma_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CHROMA_DATA_PATH:-./data/chroma}
+  
+  flowise_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${FLOWISE_DATA_PATH:-./data/flowise}
+  
+  wikipedia_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WIKIPEDIA_DATA_PATH:-./data/wikipedia}
+
+networks:
+  default:
+    name: ai-prepper-network

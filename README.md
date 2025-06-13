@@ -1,157 +1,185 @@
-# AI-Prepping: Offline RAG Chatbot for Emergencies
+# 🤖 AI-Prepper
 
-An offline-first chatbot that combines a state-of-the-art LLM with Wikipedia-based retrieval, designed for Apple Silicon Macs. Perfect for situations with limited or no internet connectivity.
+A fully offline RAG (Retrieval-Augmented Generation) system that combines Wikipedia knowledge with local LLMs. Perfect for emergency preparedness, external drive deployment, or completely air-gapped environments.
 
-## Features
+## 🌟 Features
 
-- 🔌 **100% Offline**: Works completely without internet once assets are downloaded
-- 🍎 **Apple Silicon Optimized**: Uses MLX framework for efficient M-series GPU acceleration
-- 📚 **Wikipedia-powered**: Full English Wikipedia as knowledge base
-- 🔍 **RAG Architecture**: Retrieval-Augmented Generation for accurate, grounded responses
-- 💾 **Efficient Storage**: ~50GB total disk usage with full Wikipedia
-- 🎯 **Memory-aware**: Graceful degradation for 16GB RAM systems
+- **100% Offline**: Works without any internet connection after initial setup
+- **Docker-based**: All services run in containers - no local dependencies
+- **Portable**: Can run entirely from an external drive
+- **No-Code Interface**: Flowise provides drag-and-drop workflow creation
+- **Modern Stack**: Ollama (LLMs), ChromaDB (vectors), Flowise (UI & Workflows)
+- **Wikipedia Knowledge**: Process and query the entire Wikipedia offline
 
-## Requirements
+## 🚀 Quick Start
 
-- Mac with Apple Silicon (M1/M2/M3)
-- macOS 14.0 or newer
-- 16-32GB RAM
-- ~50GB free disk space
-- Python 3.10+
+### Prerequisites
+- Docker Desktop installed
+- 50GB+ free disk space
+- 8GB+ RAM (16GB recommended)
 
-## Quick Start
+### Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/mikkelkrogsholm/ai-prepper.git
+# 1. Clone the repository
+git clone https://github.com/yourusername/ai-prepper.git
 cd ai-prepper
 
-# Download all assets and build index (one-time setup)
-# This automatically creates a virtual environment and installs dependencies
-make all
+# 2. Configure environment
+cp .env.example .env
+# Edit .env if needed (especially for external drive setup)
 
-# Start chatting!
-make run
+# 3. Initial setup
+make setup
+
+# 4. Start all services
+make up
+
+# 5. Pull AI models (requires internet, ~5GB)
+make pull-models
+
+# 6. Download Wikipedia (requires internet, ~20GB)
+make download-wiki
+
+# 7. Process Wikipedia into vector database
+make process
 ```
 
-The Makefile automatically handles virtual environment creation and activation, so you don't need to worry about it!
+## 🖥️ Access Points
 
-## Usage
+Once running, access these services:
 
-### Command Line Interface
+- **Flowise UI**: http://localhost:3000 - Complete chat interface and workflow builder
+- **Ollama API**: http://localhost:11434 - LLM server (used by Flowise)
+- **ChromaDB API**: http://localhost:8000 - Vector database (used by Flowise)
+
+## 📁 Project Structure
+
+```
+ai-prepper/
+├── docker-compose.yml    # Service definitions
+├── .env.example         # Configuration template
+├── Makefile            # Common commands
+├── scripts/            # Processing scripts
+└── data/               # Persistent storage
+    ├── ollama/         # AI models
+    ├── chroma/         # Vector database
+    ├── flowise/        # Workflows and chat data
+    └── wikipedia/      # Source data
+```
+
+## 💾 External Drive Setup
+
+To run from an external drive:
+
+1. Edit `.env`:
+```env
+EXTERNAL_DRIVE_PATH=/Volumes/YourDrive/ai-prepper
+OLLAMA_DATA_PATH=${EXTERNAL_DRIVE_PATH}/ollama
+CHROMA_DATA_PATH=${EXTERNAL_DRIVE_PATH}/chroma
+FLOWISE_DATA_PATH=${EXTERNAL_DRIVE_PATH}/flowise
+WIKIPEDIA_DATA_PATH=${EXTERNAL_DRIVE_PATH}/wikipedia
+```
+
+2. Run setup:
+```bash
+make setup
+make up
+```
+
+## 🔧 Common Commands
 
 ```bash
-# Interactive mode
-make run
-
-# Single question mode
-make question Q="What is photosynthesis?"
-
-# Use smaller model (for 16GB RAM)
-make run-small
-
-# Or if you prefer using Python directly (after make deps):
-source venv/bin/activate
-python scripts/chat.py --question "What is photosynthesis?"
+make help          # Show all commands
+make status        # Check service health
+make logs          # View service logs
+make shell         # Access processor container
+make down          # Stop all services
+make clean         # Remove containers
+make clean-all     # Remove everything (including data!)
 ```
 
-### Web Interface (Optional)
+## 🎯 Using Flowise
 
+### First Time Setup
+1. Open http://localhost:3000
+2. Create a new flow:
+   - Add **Ollama** node (connect to `http://ollama:11434`)
+   - Add **ChromaDB** node (connect to `http://chromadb:8000`)
+   - Add **Conversational Retrieval QA Chain** node
+   - Connect: ChromaDB → Chain → Ollama
+3. Save and deploy the flow
+4. Use the built-in chat interface
+
+### Chat Interface
+- Click the chat bubble icon in Flowise
+- Ask questions about Wikipedia content
+- Get AI responses with source citations
+- Export chat history as needed
+
+### API Access
+```python
+# Use Flowise API
+import requests
+
+# Get your flow's API endpoint from Flowise
+api_url = "http://localhost:3000/api/v1/prediction/{your-flow-id}"
+
+response = requests.post(api_url, json={
+    "question": "What is artificial intelligence?"
+})
+
+print(response.json())
+```
+
+## 🧰 Troubleshooting
+
+### Services won't start
 ```bash
-# Start the web server
-make web
+# Check Docker is running
+docker info
 
-# Open http://localhost:8000 in your browser
+# Check service status
+make status
+
+# View logs
+make logs
 ```
 
-## Project Structure
+### Out of disk space
+- Use external drive setup (see above)
+- Reduce MAX_ARTICLES in .env
+- Use smaller models (edit OLLAMA_MODELS in .env)
 
-```
-ai-prepping/
-├── scripts/               # Core functionality
-│   ├── chat.py           # CLI chat interface
-│   ├── download_models.py # Model downloader
-│   ├── download_wikipedia.py # Wikipedia downloader
-│   └── build_index.py    # FAISS index builder
-├── configs/              # Configuration files
-├── web/                  # Optional web UI
-├── models/               # Downloaded model files
-├── data/                 # Wikipedia corpus
-└── index/                # FAISS search index
-```
+### Performance issues
+- Allocate more RAM to Docker Desktop
+- Use smaller models (phi3 instead of llama3.2)
+- Reduce chunk size in .env
 
-## Configuration
+### Flowise Issues
+- Default login: admin/admin (change in .env)
+- If flows disappear, check `data/flowise` volume
+- For API access, enable API key in Flowise settings
 
-Edit `configs/config.yaml` to customize:
-- Model selection (7B vs 8B)
-- Memory limits
-- Retrieval parameters
-- Paths and cache locations
+## 🤝 Contributing
 
-## Makefile Targets
+Contributions welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
-```bash
-make all        # Complete setup (creates venv, installs deps, downloads everything)
-make deps       # Install dependencies in virtual environment
-make models     # Download LLM and embedding models
-make wiki       # Download and extract Wikipedia
-make index      # Build FAISS search index
-make run        # Start interactive chatbot
-make test       # Run test suite
-make clean      # Remove temporary files
-make clean-all  # Remove all downloaded data
-make web        # Start web UI server
-make check      # Check system status
-```
+## 📄 License
 
-All commands automatically use the virtual environment, so you don't need to activate it manually.
+MIT License - see LICENSE file
 
-## Models and Data
+## 🙏 Acknowledgments
 
-This project uses:
-- **LLM**: Mistral-7B-v0.1 (quantized for Apple Silicon)
-- **Embeddings**: BGE-large-en-v1.5
-- **Corpus**: English Wikipedia (latest dump)
-- **Index**: FAISS with 1024-dimensional embeddings
+- Ollama for local LLM serving
+- ChromaDB for vector storage
+- Flowise for no-code AI workflows
+- Wikipedia for knowledge base
 
-## License
+---
 
-This project is MIT licensed. See LICENSE file for details.
-
-### Third-party Licenses
-- Models: Check individual model cards for licenses
-- Wikipedia: CC BY-SA 3.0
-- Dependencies: See requirements.txt for package licenses
-
-## Troubleshooting
-
-### Out of Memory Errors
-- Use `--model small` flag to load the 7B model
-- Reduce context window in config.yaml
-- Close other applications
-
-### Slow Performance
-- Ensure you're on Apple Silicon (not Intel Mac)
-- Check Activity Monitor for memory pressure
-- Consider upgrading to a Mac with more RAM
-
-### Download Issues
-- Downloads resume automatically if interrupted
-- Use `make clean` and retry if corruption detected
-- Check disk space (need ~100GB during setup)
-
-## Contributing
-
-Pull requests welcome! Please:
-- Follow existing code style
-- Add tests for new features
-- Update documentation as needed
-
-## Emergency Preparedness Tips
-
-While this tool provides offline information access, remember:
-- Keep your device charged
-- Download updates periodically when connected
-- Test the system before you need it
-- Consider solar charging options
-- Have backup power banks ready
+Built with ❤️ for offline resilience

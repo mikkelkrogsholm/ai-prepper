@@ -44,10 +44,7 @@ coverage.xml
 .DS_Store
 
 # Project specific
-models/
 data/
-index/
-cache/
 *.index
 *.pkl
 wikipedia_dump.xml.bz2
@@ -63,6 +60,12 @@ logs/
 
 # History
 .ai-prepping_history
+
+# Docker volumes
+data/ollama/
+data/chroma/
+data/flowise/
+data/wikipedia/
 
 # Temporary files
 tmp/
@@ -83,3 +86,7 @@ temp/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Docker
+.env
+docker-compose.override.yml

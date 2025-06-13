@@ -7,7 +7,7 @@ import argparse
 import pickle
 import readline
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 import json
 
 import numpy as np
@@ -17,8 +17,7 @@ from rich.markdown import Markdown
 from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.syntax import Syntax
-import mlx.core as mx
-from mlx_lm import load, generate
+import ollama
 
 # Add parent dir to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
@@ -111,15 +110,40 @@ class RAGChatbot:
         console.print(f"  Loaded embeddings: {model_name}")
     
     def _load_llm(self):
-        """Load language model."""
+        """Load language model via Ollama."""
+        # Determine model name based on memory constraints
         if self.model_size == "small" or self.config.is_low_memory:
-            model_name = self.config.get('models.llm.small')
+            # For Ollama, we'll use a smaller model like phi3
+            alternatives = self.config.get('models.llm.alternatives', ['phi3', 'gemma2'])
+            model_name = alternatives[2] if len(alternatives) > 2 else 'phi3'  # Use phi3 as small model
             console.print("  Using small model (low memory mode)")
         else:
-            model_name = self.config.get('models.llm.default')
+            # Use default from config
+            model_name = self.config.get('models.llm.default', 'llama3.2')
         
-        self.model, self.tokenizer = load(model_name)
-        console.print(f"  Loaded LLM: {model_name}")
+        # Check if model is available in Ollama
+        try:
+            # Get list of available models
+            models = ollama.list()
+            model_names = [m['name'] for m in models.get('models', [])]
+            
+            # Check if our model is available
+            if not any(model_name in name for name in model_names):
+                console.print(f"[yellow]Model '{model_name}' not found in Ollama. Pulling it now...[/yellow]")
+                try:
+                    ollama.pull(model_name)
+                    console.print(f"[green]Successfully pulled {model_name}[/green]")
+                except Exception as e:
+                    console.print(f"[red]Failed to pull model: {e}[/red]")
+                    console.print(f"[yellow]Please run 'ollama pull {model_name}' manually[/yellow]")
+                    raise
+        except Exception as e:
+            console.print(f"[red]Error checking Ollama models: {e}[/red]")
+            console.print("[yellow]Make sure Ollama is running (ollama serve)[/yellow]")
+            raise
+        
+        self.model_name = model_name
+        console.print(f"  Loaded LLM: {model_name} (via Ollama)")
         
         # Model settings
         self.max_tokens = self.config.get('models.llm.max_tokens', 2048)
@@ -206,17 +230,28 @@ User Question: {query}
 
 Assistant Response:"""
         
-        # Generate response
-        response = generate(
-            self.model,
-            self.tokenizer,
-            prompt=prompt,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            top_p=self.top_p
-        )
-        
-        return response
+        # Generate response using Ollama
+        try:
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=prompt,
+                options={
+                    'num_predict': self.max_tokens,
+                    'temperature': self.temperature,
+                    'top_p': self.top_p,
+                }
+            )
+            
+            # Extract the response text
+            return response.get('response', '').strip()
+            
+        except ollama.ResponseError as e:
+            console.print(f"[red]Ollama API error: {e}[/red]")
+            # Fallback response
+            return "I apologize, but I'm having trouble generating a response. Please ensure Ollama is running and try again."
+        except Exception as e:
+            console.print(f"[red]Unexpected error: {e}[/red]")
+            return "An unexpected error occurred while generating the response."
     
     def answer_question(self, query: str) -> Tuple[str, List[TextChunk]]:
         """Answer a question using RAG.
@@ -318,7 +353,7 @@ Assistant Response:"""
 [bold]System Statistics:[/bold]
   Index vectors: {self.index.ntotal:,}
   Total chunks: {len(self.chunks):,}
-  Model: {self.config.llm_model}
+  Model: {self.model_name} (Ollama)
   Embeddings: {self.config.get('models.embeddings.model')}
   Memory mode: {'Low' if self.config.is_low_memory else 'Normal'}
         """

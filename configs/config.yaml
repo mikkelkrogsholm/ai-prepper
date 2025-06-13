@@ -3,18 +3,25 @@
 # Model settings
 models:
   llm:
-    default: "mlx-community/Mistral-7B-v0.1-8bit"
-    small: "mlx-community/Mistral-7B-v0.1-4bit"
+    default: "llama3.2"
     alternatives:
-      - "mlx-community/Llama-3.2-3B-Instruct-8bit"
+      - "mistral"
+      - "qwen2.5"
+      - "phi3"
+      - "gemma2"
+    # Ollama API settings
+    api_url: "http://localhost:11434"
     max_tokens: 2048
     temperature: 0.7
     top_p: 0.95
+    timeout: 120
   
   embeddings:
-    model: "mlx-community/bge-large-en-v1.5"
-    dimension: 1024
+    model: "nomic-embed-text"
+    dimension: 768
     max_length: 512
+    # Fallback to sentence-transformers if Ollama embedding fails
+    fallback_model: "sentence-transformers/all-MiniLM-L6-v2"
 
 # Data paths
 paths:
@@ -22,7 +29,7 @@ paths:
   data_dir: "./data"
   index_dir: "./index"
   cache_dir: "./cache"
-  history_file: "~/.ai-prepping_history"
+  history_file: "./cache/.ai-prepping_history"
 
 # Wikipedia settings
 wikipedia:

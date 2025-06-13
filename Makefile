@@ -1,228 +1,174 @@
 # AI-Prepping Makefile
-# Build offline RAG chatbot for Apple Silicon Macs
+# Docker-based offline RAG system
 
-VENV := venv
-PYTHON := $(VENV)/bin/python
-PIP := $(VENV)/bin/pip
+# Docker settings
+COMPOSE := docker-compose
+DOCKER := docker
 
-# Directories
-MODELS_DIR := models
+# Data directories
 DATA_DIR := data
-INDEX_DIR := index
-CACHE_DIR := cache
+OLLAMA_DIR := $(DATA_DIR)/ollama
+CHROMA_DIR := $(DATA_DIR)/chroma
+FLOWISE_DIR := $(DATA_DIR)/flowise
+WIKIPEDIA_DIR := $(DATA_DIR)/wikipedia
 
 # Default target
 .DEFAULT_GOAL := help
 
 # Phony targets
-.PHONY: all help venv deps models wiki index clean clean-all test run web check
+.PHONY: all help up down start stop restart logs build clean clean-all setup-dirs pull-models download-wiki process status shell
 
 # Help target
 help:
-	@echo "AI-Prepping Build System"
+	@echo "AI-Prepper Docker System"
 	@echo "========================"
 	@echo ""
-	@echo "Setup targets:"
-	@echo "  make all        - Complete setup (download models, wiki, build index)"
-	@echo "  make venv       - Create Python virtual environment"
-	@echo "  make deps       - Install Python dependencies"
-	@echo "  make models     - Download ML models"
-	@echo "  make wiki       - Download and extract Wikipedia"
-	@echo "  make index      - Build FAISS search index"
+	@echo "Quick start:"
+	@echo "  make setup      - Initial setup (create dirs, copy env)"
+	@echo "  make up         - Start all services"
+	@echo "  make status     - Check service status"
 	@echo ""
-	@echo "Usage targets:"
-	@echo "  make run        - Start interactive chatbot"
-	@echo "  make web        - Start web UI server"
-	@echo "  make test       - Run test suite"
-	@echo "  make check      - Verify all components are ready"
+	@echo "Docker commands:"
+	@echo "  make build      - Build Docker images"
+	@echo "  make up         - Start all services"
+	@echo "  make down       - Stop all services"
+	@echo "  make restart    - Restart all services"
+	@echo "  make logs       - View service logs"
+	@echo "  make status     - Check service status"
 	@echo ""
-	@echo "Maintenance targets:"
-	@echo "  make clean      - Remove temporary files"
-	@echo "  make clean-all  - Remove all downloaded data"
+	@echo "Data management:"
+	@echo "  make pull-models    - Pull Ollama models"
+	@echo "  make download-wiki  - Download Wikipedia data"
+	@echo "  make process        - Process Wikipedia into ChromaDB"
 	@echo ""
+	@echo "Access points:"
+	@echo "  - Ollama API:    http://localhost:11434"
+	@echo "  - ChromaDB API:  http://localhost:8000"
+	@echo "  - Flowise UI:    http://localhost:3000"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  make clean      - Remove containers and networks"
+	@echo "  make clean-all  - Remove everything including data"
+	@echo "  make shell      - Shell into processor container"
 
-# Virtual environment
-$(VENV)/bin/activate:
-	@echo "Creating virtual environment..."
-	@python3 -m venv $(VENV)
-	@echo "✓ Virtual environment created"
+# Initial setup
+setup: setup-dirs
+	@echo "Setting up AI-Prepper..."
+	@if [ ! -f .env ]; then \
+		echo "Creating .env from .env.example..."; \
+		cp .env.example .env; \
+		echo "✓ Created .env file - please review and adjust settings"; \
+	else \
+		echo "✓ .env file already exists"; \
+	fi
+	@echo ""
+	@echo "Next steps:"
+	@echo "1. Review and edit .env file"
+	@echo "2. Run 'make up' to start services"
+	@echo "3. Run 'make pull-models' to download models"
+	@echo "4. Run 'make download-wiki' to get Wikipedia data"
 
-# Shortcut for venv
-venv: $(VENV)/bin/activate
+# Create data directories
+setup-dirs:
+	@echo "Creating data directories..."
+	@mkdir -p $(OLLAMA_DIR) $(CHROMA_DIR) $(FLOWISE_DIR) $(WIKIPEDIA_DIR)
+	@echo "✓ Data directories created"
 
-# Dependencies
-deps: $(VENV)/bin/activate requirements.txt
-	@echo "Installing dependencies..."
-	@$(PIP) install --upgrade pip
-	@$(PIP) install -r requirements.txt
-	@echo "✓ Dependencies installed"
+# Build Docker images
+build:
+	@echo "Building Docker images..."
+	$(COMPOSE) build
 
-# Create directories
-$(MODELS_DIR) $(DATA_DIR) $(INDEX_DIR) $(CACHE_DIR):
-	@mkdir -p $@
+# Start all services
+up: setup-dirs
+	@echo "Starting AI-Prepper services..."
+	$(COMPOSE) up -d
+	@echo ""
+	@echo "✓ Services starting..."
+	@echo "Run 'make logs' to view logs"
+	@echo "Run 'make status' to check status"
 
-# Download models
-models: deps $(MODELS_DIR)
-	@echo "Downloading ML models..."
-	@$(PYTHON) scripts/download_models.py --model all
-	@echo "✓ Models downloaded"
+# Stop all services
+down:
+	@echo "Stopping AI-Prepper services..."
+	$(COMPOSE) down
+
+# Start services (if stopped)
+start:
+	$(COMPOSE) start
+
+# Stop services (without removing)
+stop:
+	$(COMPOSE) stop
+
+# Restart all services
+restart:
+	@echo "Restarting AI-Prepper services..."
+	$(COMPOSE) restart
+
+# View logs
+logs:
+	$(COMPOSE) logs -f
+
+# Check service status
+status:
+	@echo "AI-Prepper Service Status"
+	@echo "========================"
+	@$(COMPOSE) ps
+	@echo ""
+	@echo "Checking service health..."
+	@curl -s http://localhost:11434/api/version > /dev/null 2>&1 && echo "✓ Ollama is running" || echo "✗ Ollama is not accessible"
+	@curl -s http://localhost:8000/api/v1/heartbeat > /dev/null 2>&1 && echo "✓ ChromaDB is running" || echo "✗ ChromaDB is not accessible"
+	@curl -s http://localhost:3000 > /dev/null 2>&1 && echo "✓ Flowise is running" || echo "✗ Flowise is not accessible"
+
+# Pull Ollama models
+pull-models:
+	@echo "Pulling Ollama models..."
+	@echo "This will pull models defined in .env OLLAMA_MODELS"
+	$(COMPOSE) run --rm processor python -m scripts.orchestrator --wait-for-services
 
 # Download Wikipedia
-wiki: deps $(DATA_DIR)
-	@echo "Downloading Wikipedia dump..."
-	@$(PYTHON) scripts/download_wikipedia.py --action all
-	@echo "✓ Wikipedia downloaded and extracted"
+download-wiki:
+	@echo "Downloading Wikipedia data..."
+	$(COMPOSE) run --rm processor python -m scripts.download_wikipedia
 
-# Build search index
-index: deps $(INDEX_DIR) wiki
-	@echo "Building FAISS index..."
-	@$(PYTHON) scripts/build_index.py
-	@echo "✓ Search index built"
+# Process Wikipedia into ChromaDB
+process:
+	@echo "Processing Wikipedia data into ChromaDB..."
+	$(COMPOSE) run --rm processor python -m scripts.process_wikipedia
 
-# Complete setup
-all: deps models wiki index
-	@echo ""
-	@echo "✓ AI-Prepping setup complete!"
-	@echo ""
-	@echo "Run 'make run' to start the chatbot"
-
-# Run chatbot
-run: deps
-	@if [ ! -f "$(INDEX_DIR)/wikipedia.index" ]; then \
-		echo "Error: Index not found. Run 'make all' first."; \
-		exit 1; \
-	fi
-	@$(PYTHON) scripts/chat.py
-
-# Run single question
-question: deps
-	@if [ -z "$(Q)" ]; then \
-		echo "Usage: make question Q=\"your question here\""; \
-		exit 1; \
-	fi
-	@$(PYTHON) scripts/chat.py --question "$(Q)"
-
-# Start web UI
-web: deps
-	@if [ ! -f "$(INDEX_DIR)/wikipedia.index" ]; then \
-		echo "Error: Index not found. Run 'make all' first."; \
-		exit 1; \
-	fi
-	@echo "Starting web UI at http://localhost:8000"
-	@cd web && ../$(PYTHON) -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
-
-# Run tests
-test: deps
-	@echo "Running test suite..."
-	@$(PYTHON) -m pytest tests/ -v
-
-# Quick test
-test-quick: deps
-	@$(PYTHON) -m pytest tests/ -v -m "not slow"
-
-# Check system status
-check: deps
-	@echo "Checking AI-Prepping status..."
-	@echo ""
-	@echo -n "Python version: "
-	@$(PYTHON) --version
-	@echo ""
-	@echo -n "Virtual environment: "
-	@if [ -d "$(VENV)" ]; then \
-		echo "✓ Active"; \
-	else \
-		echo "✗ Not found"; \
-	fi
-	@echo -n "Models: "
-	@if [ -d "$(MODELS_DIR)" ] && [ "$$(ls -A $(MODELS_DIR) 2>/dev/null)" ]; then \
-		echo "✓ Downloaded"; \
-	else \
-		echo "✗ Not found"; \
-	fi
-	@echo -n "Wikipedia data: "
-	@if [ -f "$(DATA_DIR)/wikipedia_articles.txt" ]; then \
-		echo "✓ Downloaded"; \
-	else \
-		echo "✗ Not found"; \
-	fi
-	@echo -n "Search index: "
-	@if [ -f "$(INDEX_DIR)/wikipedia.index" ]; then \
-		echo "✓ Built"; \
-	else \
-		echo "✗ Not found"; \
-	fi
-	@echo ""
-	@$(PYTHON) scripts/download_wikipedia.py --action verify || true
-	@$(PYTHON) scripts/build_index.py --verify || true
-
-# Clean temporary files
+# Clean up containers and networks
 clean:
-	@echo "Cleaning temporary files..."
-	@find . -type f -name "*.pyc" -delete
-	@find . -type d -name "__pycache__" -delete
-	@find . -type f -name ".DS_Store" -delete
-	@rm -rf $(CACHE_DIR)
-	@echo "✓ Cleaned"
+	@echo "Cleaning up containers and networks..."
+	$(COMPOSE) down -v
+	@echo "✓ Containers and networks removed"
 
-# Clean all downloaded data
+# Clean everything including data
 clean-all: clean
-	@echo "Removing all downloaded data..."
-	@echo "This will delete:"
-	@echo "  - $(MODELS_DIR)/"
-	@echo "  - $(DATA_DIR)/"
-	@echo "  - $(INDEX_DIR)/"
-	@echo ""
-	@read -p "Are you sure? [y/N] " -n 1 -r; \
-	echo ""; \
-	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		rm -rf $(MODELS_DIR) $(DATA_DIR) $(INDEX_DIR); \
+	@echo "Removing all data..."
+	@read -p "This will delete all downloaded models and data. Continue? [y/N] " confirm && \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		rm -rf $(DATA_DIR); \
 		echo "✓ All data removed"; \
 	else \
 		echo "Cancelled"; \
 	fi
 
-# Development helpers
-lint: deps
-	@echo "Running linters..."
-	@$(PYTHON) -m ruff check scripts/ tests/
-	@$(PYTHON) -m mypy scripts/ --ignore-missing-imports
+# Shell into processor container
+shell:
+	$(COMPOSE) run --rm processor /bin/bash
 
-format: deps
-	@echo "Formatting code..."
-	@$(PYTHON) -m black scripts/ tests/
-	@$(PYTHON) -m isort scripts/ tests/
+# Quick test
+test:
+	@echo "Testing AI-Prepper setup..."
+	$(COMPOSE) run --rm processor python -c "import ollama; import chromadb; print('✓ Dependencies OK')"
 
-# Install development dependencies
-dev-deps: deps
-	@$(PIP) install black isort mypy ruff
+# Development mode - start with logs
+dev: up
+	$(COMPOSE) logs -f
 
-# Show disk usage
-disk-usage:
-	@echo "Disk usage:"
-	@du -sh $(MODELS_DIR) 2>/dev/null || echo "  Models: not downloaded"
-	@du -sh $(DATA_DIR) 2>/dev/null || echo "  Data: not downloaded"
-	@du -sh $(INDEX_DIR) 2>/dev/null || echo "  Index: not built"
-	@echo ""
-	@echo -n "Total: "
-	@du -sh . 2>/dev/null
-
-# Download specific model
-model-%: deps
-	@$(PYTHON) scripts/download_models.py --llm-name mlx-community/$*
-
-# Run with specific model
-run-%: deps
-	@$(PYTHON) scripts/chat.py --model $*
-
-# Memory check
-memory-check: deps
-	@echo "Checking system memory..."
-	@$(PYTHON) -c "import psutil; m=psutil.virtual_memory(); print(f'Available: {m.available/(1024**3):.1f}GB / {m.total/(1024**3):.1f}GB ({m.percent}% used)')"
-
-# Create shell script wrapper (for non-Python users)
-shell-wrapper:
-	@echo "#!/bin/bash" > ai-prepper.sh
-	@echo "source venv/bin/activate 2>/dev/null || true" >> ai-prepper.sh
-	@echo "python scripts/chat.py \$$@" >> ai-prepper.sh
-	@chmod +x ai-prepper.sh
-	@echo "✓ Created ai-prepper.sh wrapper script"
+# External drive setup
+external-setup:
+	@echo "Setting up for external drive..."
+	@echo "Edit .env and uncomment EXTERNAL_DRIVE_PATH section"
+	@echo "Then run 'make setup' again"
