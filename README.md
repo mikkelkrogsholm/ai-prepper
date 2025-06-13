@@ -26,15 +26,15 @@ An offline-first chatbot that combines a state-of-the-art LLM with Wikipedia-bas
 git clone https://github.com/mikkelkrogsholm/ai-prepper.git
 cd ai-prepper
 
-# Install dependencies
-pip install -r requirements.txt
-
 # Download all assets and build index (one-time setup)
+# This automatically creates a virtual environment and installs dependencies
 make all
 
 # Start chatting!
-python scripts/chat.py
+make run
 ```
+
+The Makefile automatically handles virtual environment creation and activation, so you don't need to worry about it!
 
 ## Usage
 
@@ -42,13 +42,17 @@ python scripts/chat.py
 
 ```bash
 # Interactive mode
-python scripts/chat.py
+make run
 
 # Single question mode
-python scripts/chat.py --question "What is photosynthesis?"
+make question Q="What is photosynthesis?"
 
 # Use smaller model (for 16GB RAM)
-python scripts/chat.py --model small
+make run-small
+
+# Or if you prefer using Python directly (after make deps):
+source venv/bin/activate
+python scripts/chat.py --question "What is photosynthesis?"
 ```
 
 ### Web Interface (Optional)
@@ -87,14 +91,20 @@ Edit `configs/config.yaml` to customize:
 ## Makefile Targets
 
 ```bash
+make all        # Complete setup (creates venv, installs deps, downloads everything)
+make deps       # Install dependencies in virtual environment
 make models     # Download LLM and embedding models
 make wiki       # Download and extract Wikipedia
 make index      # Build FAISS search index
-make all        # Run all setup steps
+make run        # Start interactive chatbot
 make test       # Run test suite
-make clean      # Remove downloaded assets
+make clean      # Remove temporary files
+make clean-all  # Remove all downloaded data
 make web        # Start web UI server
+make check      # Check system status
 ```
+
+All commands automatically use the virtual environment, so you don't need to activate it manually.
 
 ## Models and Data
 

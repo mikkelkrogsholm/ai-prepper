@@ -1,9 +1,9 @@
 # AI-Prepping Makefile
 # Build offline RAG chatbot for Apple Silicon Macs
 
-PYTHON := python3
-PIP := pip3
 VENV := venv
+PYTHON := $(VENV)/bin/python
+PIP := $(VENV)/bin/pip
 
 # Directories
 MODELS_DIR := models
@@ -42,13 +42,16 @@ help:
 	@echo ""
 
 # Virtual environment
-venv:
+$(VENV)/bin/activate:
 	@echo "Creating virtual environment..."
-	@$(PYTHON) -m venv $(VENV)
-	@echo "Virtual environment created. Activate with: source $(VENV)/bin/activate"
+	@python3 -m venv $(VENV)
+	@echo "✓ Virtual environment created"
+
+# Shortcut for venv
+venv: $(VENV)/bin/activate
 
 # Dependencies
-deps: requirements.txt
+deps: $(VENV)/bin/activate requirements.txt
 	@echo "Installing dependencies..."
 	@$(PIP) install --upgrade pip
 	@$(PIP) install -r requirements.txt
@@ -59,19 +62,19 @@ $(MODELS_DIR) $(DATA_DIR) $(INDEX_DIR) $(CACHE_DIR):
 	@mkdir -p $@
 
 # Download models
-models: $(MODELS_DIR)
+models: deps $(MODELS_DIR)
 	@echo "Downloading ML models..."
 	@$(PYTHON) scripts/download_models.py --model all
 	@echo "✓ Models downloaded"
 
 # Download Wikipedia
-wiki: $(DATA_DIR)
+wiki: deps $(DATA_DIR)
 	@echo "Downloading Wikipedia dump..."
 	@$(PYTHON) scripts/download_wikipedia.py --action all
 	@echo "✓ Wikipedia downloaded and extracted"
 
 # Build search index
-index: $(INDEX_DIR) wiki
+index: deps $(INDEX_DIR) wiki
 	@echo "Building FAISS index..."
 	@$(PYTHON) scripts/build_index.py
 	@echo "✓ Search index built"
@@ -84,7 +87,7 @@ all: deps models wiki index
 	@echo "Run 'make run' to start the chatbot"
 
 # Run chatbot
-run:
+run: deps
 	@if [ ! -f "$(INDEX_DIR)/wikipedia.index" ]; then \
 		echo "Error: Index not found. Run 'make all' first."; \
 		exit 1; \
@@ -92,7 +95,7 @@ run:
 	@$(PYTHON) scripts/chat.py
 
 # Run single question
-question:
+question: deps
 	@if [ -z "$(Q)" ]; then \
 		echo "Usage: make question Q=\"your question here\""; \
 		exit 1; \
@@ -100,30 +103,36 @@ question:
 	@$(PYTHON) scripts/chat.py --question "$(Q)"
 
 # Start web UI
-web:
+web: deps
 	@if [ ! -f "$(INDEX_DIR)/wikipedia.index" ]; then \
 		echo "Error: Index not found. Run 'make all' first."; \
 		exit 1; \
 	fi
 	@echo "Starting web UI at http://localhost:8000"
-	@cd web && $(PYTHON) -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+	@cd web && ../$(PYTHON) -m uvicorn app:app --host 127.0.0.1 --port 8000 --reload
 
 # Run tests
-test:
+test: deps
 	@echo "Running test suite..."
 	@$(PYTHON) -m pytest tests/ -v
 
 # Quick test
-test-quick:
+test-quick: deps
 	@$(PYTHON) -m pytest tests/ -v -m "not slow"
 
 # Check system status
-check:
+check: deps
 	@echo "Checking AI-Prepping status..."
 	@echo ""
 	@echo -n "Python version: "
 	@$(PYTHON) --version
 	@echo ""
+	@echo -n "Virtual environment: "
+	@if [ -d "$(VENV)" ]; then \
+		echo "✓ Active"; \
+	else \
+		echo "✗ Not found"; \
+	fi
 	@echo -n "Models: "
 	@if [ -d "$(MODELS_DIR)" ] && [ "$$(ls -A $(MODELS_DIR) 2>/dev/null)" ]; then \
 		echo "✓ Downloaded"; \
@@ -173,18 +182,18 @@ clean-all: clean
 	fi
 
 # Development helpers
-lint:
+lint: deps
 	@echo "Running linters..."
 	@$(PYTHON) -m ruff check scripts/ tests/
 	@$(PYTHON) -m mypy scripts/ --ignore-missing-imports
 
-format:
+format: deps
 	@echo "Formatting code..."
 	@$(PYTHON) -m black scripts/ tests/
 	@$(PYTHON) -m isort scripts/ tests/
 
 # Install development dependencies
-dev-deps:
+dev-deps: deps
 	@$(PIP) install black isort mypy ruff
 
 # Show disk usage
@@ -198,15 +207,15 @@ disk-usage:
 	@du -sh . 2>/dev/null
 
 # Download specific model
-model-%:
+model-%: deps
 	@$(PYTHON) scripts/download_models.py --llm-name mlx-community/$*
 
 # Run with specific model
-run-%:
+run-%: deps
 	@$(PYTHON) scripts/chat.py --model $*
 
 # Memory check
-memory-check:
+memory-check: deps
 	@echo "Checking system memory..."
 	@$(PYTHON) -c "import psutil; m=psutil.virtual_memory(); print(f'Available: {m.available/(1024**3):.1f}GB / {m.total/(1024**3):.1f}GB ({m.percent}% used)')"
 
@@ -214,6 +223,6 @@ memory-check:
 shell-wrapper:
 	@echo "#!/bin/bash" > ai-prepper.sh
 	@echo "source venv/bin/activate 2>/dev/null || true" >> ai-prepper.sh
-	@echo "python3 scripts/chat.py \$$@" >> ai-prepper.sh
+	@echo "python scripts/chat.py \$$@" >> ai-prepper.sh
 	@chmod +x ai-prepper.sh
 	@echo "✓ Created ai-prepper.sh wrapper script"
