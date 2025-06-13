@@ -1,0 +1,79 @@
+# AI-Prepping Configuration
+
+# Model settings
+models:
+  llm:
+    default: "mlx-community/Mistral-7B-v0.1-8bit"
+    small: "mlx-community/Mistral-7B-v0.1-4bit"
+    alternatives:
+      - "mlx-community/Llama-3.2-3B-Instruct-8bit"
+    max_tokens: 2048
+    temperature: 0.7
+    top_p: 0.95
+  
+  embeddings:
+    model: "mlx-community/bge-large-en-v1.5"
+    dimension: 1024
+    max_length: 512
+
+# Data paths
+paths:
+  models_dir: "./models"
+  data_dir: "./data"
+  index_dir: "./index"
+  cache_dir: "./cache"
+  history_file: "~/.ai-prepping_history"
+
+# Wikipedia settings
+wikipedia:
+  dump_url: "https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2"
+  language: "en"
+  max_articles: null  # null for all articles
+  chunk_size: 512
+  chunk_overlap: 128
+
+# Retrieval settings
+retrieval:
+  top_k: 5
+  score_threshold: 0.7
+  max_context_length: 4096
+  rerank: true
+
+# System settings
+system:
+  max_memory_gb: 32
+  low_memory_mode: false  # Auto-enabled if <20GB available
+  num_threads: 8
+  device: "mps"  # Metal Performance Shaders
+  
+# Download settings
+downloads:
+  chunk_size: 8192
+  timeout: 300
+  max_retries: 3
+  verify_checksums: true
+
+# UI settings
+ui:
+  cli:
+    prompt: "🤖 AI-Prepper> "
+    color_scheme: "monokai"
+    enable_history: true
+    max_history: 1000
+  
+  web:
+    host: "127.0.0.1"
+    port: 8000
+    debug: false
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: null  # Set to path for file logging
+
+# Model checksums (SHA-256)
+checksums:
+  "Mistral-7B-v0.1-8bit": "sha256:expected_hash_here"
+  "Mistral-7B-v0.1-4bit": "sha256:expected_hash_here"
+  "bge-large-en-v1.5": "sha256:expected_hash_here"

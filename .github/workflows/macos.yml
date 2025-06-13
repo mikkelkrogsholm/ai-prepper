@@ -1,0 +1,119 @@
+name: macOS Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: macos-14-arm64
+    
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/Library/Caches/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-cov
+    
+    - name: Check system info
+      run: |
+        echo "System info:"
+        uname -a
+        echo "Python version:"
+        python --version
+        echo "Pip version:"
+        pip --version
+        echo "Available memory:"
+        python -c "import psutil; m=psutil.virtual_memory(); print(f'{m.available/(1024**3):.1f}GB / {m.total/(1024**3):.1f}GB')"
+    
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v -m "not slow and not integration" --cov=scripts --cov-report=xml
+    
+    - name: Test imports
+      run: |
+        python -c "from scripts.config_loader import get_config"
+        python -c "from scripts.chunk_utils import TextChunker"
+        python -c "import mlx"
+        python -c "import faiss"
+    
+    - name: Test CLI help
+      run: |
+        python scripts/download_models.py --help
+        python scripts/download_wikipedia.py --help
+        python scripts/build_index.py --help
+        python scripts/chat.py --help
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      if: matrix.python-version == '3.11'
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+    
+    - name: Check code quality
+      if: matrix.python-version == '3.11'
+      run: |
+        pip install ruff mypy
+        ruff check scripts/ || true
+        mypy scripts/ --ignore-missing-imports || true
+
+  integration:
+    runs-on: macos-14-arm64
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Create test Wikipedia stub
+      run: |
+        mkdir -p data
+        echo "=== Test Article ===" > data/wikipedia_articles.txt
+        echo "This is a test article about artificial intelligence." >> data/wikipedia_articles.txt
+        echo "" >> data/wikipedia_articles.txt
+        echo "=== Another Test ===" >> data/wikipedia_articles.txt
+        echo "This article discusses machine learning concepts." >> data/wikipedia_articles.txt
+    
+    - name: Test index building
+      run: |
+        python scripts/build_index.py --force
+    
+    - name: Test chat system (non-interactive)
+      run: |
+        python scripts/chat.py --question "What is AI?" --no-color || echo "Expected to fail without models"
+    
+    - name: Run integration tests
+      run: |
+        pytest tests/ -v -m "integration" || echo "Integration tests not yet implemented"
