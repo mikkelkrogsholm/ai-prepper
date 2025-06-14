@@ -22,7 +22,7 @@ A fully offline RAG (Retrieval-Augmented Generation) system that combines Wikipe
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/ai-prepper.git
+git clone https://github.com/mikkelkrogsholm/ai-prepper.git
 cd ai-prepper
 
 # 2. Configure environment
