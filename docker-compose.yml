@@ -60,9 +60,10 @@ services:
 
   # Wikipedia Processor - Custom service for data ingestion
   processor:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
+    image: ai-prepper/processor:latest
     container_name: ai-prepper-processor
     volumes:
       - wikipedia_data:/app/data
