@@ -29,19 +29,22 @@ cd ai-prepper
 cp .env.example .env
 # Edit .env if needed (especially for external drive setup)
 
-# 3. Initial setup
+# 3. Cache Docker images for offline use
+make cache-images
+
+# 4. Initial setup
 make setup
 
-# 4. Start all services
+# 5. Start all services
 make up
 
-# 5. Pull AI models (requires internet, ~5GB)
+# 6. Pull AI models (requires internet, ~5GB)
 make pull-models
 
-# 6. Download Wikipedia (requires internet, ~20GB)
+# 7. Download Wikipedia (requires internet, ~20GB)
 make download-wiki
 
-# 7. Process Wikipedia into vector database
+# 8. Process Wikipedia into vector database
 make process
 ```
 
@@ -52,6 +55,12 @@ Once running, access these services:
 - **Flowise UI**: http://localhost:3000 - Complete chat interface and workflow builder
 - **Ollama API**: http://localhost:11434 - LLM server (used by Flowise)
 - **ChromaDB API**: http://localhost:8000 - Vector database (used by Flowise)
+
+## 💽 Offline Docker Images
+
+Run `make cache-images` while online to pull all Docker containers and store them
+as tar files under `offline_images/`. On a new machine without internet access,
+restore them with `make load-images` before running `make up`.
 
 ## 📁 Project Structure
 

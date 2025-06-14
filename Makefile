@@ -5,6 +5,10 @@
 COMPOSE := docker-compose
 DOCKER := docker
 
+# Offline image cache
+OFFLINE_DIR := offline_images
+IMAGES := ollama/ollama:latest chromadb/chroma:latest flowiseai/flowise:latest ai-prepper/processor:latest
+
 # Data directories
 DATA_DIR := data
 OLLAMA_DIR := $(DATA_DIR)/ollama
@@ -16,7 +20,7 @@ WIKIPEDIA_DIR := $(DATA_DIR)/wikipedia
 .DEFAULT_GOAL := help
 
 # Phony targets
-.PHONY: all help up down start stop restart logs build clean clean-all setup-dirs pull-models download-wiki process status shell
+.PHONY: all help up down start stop restart logs build clean clean-all setup-dirs pull-models download-wiki process status shell pull-images cache-images load-images
 
 # Help target
 help:
@@ -24,9 +28,10 @@ help:
 	@echo "========================"
 	@echo ""
 	@echo "Quick start:"
-	@echo "  make setup      - Initial setup (create dirs, copy env)"
-	@echo "  make up         - Start all services"
-	@echo "  make status     - Check service status"
+        @echo "  make setup        - Initial setup (create dirs, copy env)"
+        @echo "  make cache-images - Pull and save Docker images"
+        @echo "  make up           - Start all services"
+        @echo "  make status       - Check service status"
 	@echo ""
 	@echo "Docker commands:"
 	@echo "  make build      - Build Docker images"
@@ -36,10 +41,11 @@ help:
 	@echo "  make logs       - View service logs"
 	@echo "  make status     - Check service status"
 	@echo ""
-	@echo "Data management:"
-	@echo "  make pull-models    - Pull Ollama models"
-	@echo "  make download-wiki  - Download Wikipedia data"
-	@echo "  make process        - Process Wikipedia into ChromaDB"
+        @echo "Data management:"
+        @echo "  make pull-models    - Pull Ollama models"
+        @echo "  make download-wiki  - Download Wikipedia data"
+        @echo "  make process        - Process Wikipedia into ChromaDB"
+        @echo "  make load-images    - Load cached Docker images"
 	@echo ""
 	@echo "Access points:"
 	@echo "  - Ollama API:    http://localhost:11434"
@@ -76,8 +82,34 @@ setup-dirs:
 
 # Build Docker images
 build:
-	@echo "Building Docker images..."
-	$(COMPOSE) build
+        @echo "Building Docker images..."
+        $(COMPOSE) build
+
+# Pull images for offline use
+pull-images:
+        @echo "Pulling Docker images..."
+        $(COMPOSE) pull ollama chromadb flowise
+        $(COMPOSE) build processor
+
+# Save pulled images to offline directory
+cache-images: pull-images
+        @echo "Saving Docker images to $(OFFLINE_DIR)..."
+        @mkdir -p $(OFFLINE_DIR)
+        @for img in $(IMAGES); do \
+                fname=$$(echo $$img | tr '/:' '_'); \
+                echo "  Saving $$img"; \
+                $(DOCKER) save $$img -o $(OFFLINE_DIR)/$$fname.tar; \
+        done
+        @echo "✓ Images cached in $(OFFLINE_DIR)"
+
+# Load cached images
+load-images:
+        @echo "Loading Docker images from $(OFFLINE_DIR)..."
+        @for tar in $(OFFLINE_DIR)/*.tar; do \
+                echo "  Loading $$tar"; \
+                $(DOCKER) load -i $$tar; \
+        done
+        @echo "✓ Images loaded"
 
 # Start all services
 up: setup-dirs
